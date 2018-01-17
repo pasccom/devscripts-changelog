@@ -1,0 +1,13 @@
+%PACKAGE% (%VERSION%+2) %AREA%; urgency=%URGENCY%
+
+  * Test 2 line 1.
+  * Test 2 line 2.
+
+ -- %MAINTAINER%
+
+%PACKAGE% (%VERSION%+1) %AREA%; urgency=%URGENCY%
+
+  * Test 2 line 1.
+  * Test 2 line 2.
+
+ -- %MAINTAINER%

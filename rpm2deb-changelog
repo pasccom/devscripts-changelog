@@ -1,0 +1,449 @@
+#!/usr/bin/perl -W
+
+################################################################
+#
+# Copyright (c) 2018 Pascal COMBES
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License version 2 or 3 as
+# published by the Free Software Foundation.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program (see the file COPYING); if not, write to the
+# Free Software Foundation, Inc.,
+# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA
+#
+################################################################
+
+my $script_version='0.0.1'
+
+use strict;
+
+use Cwd;
+use File::Basename;
+use DateTime::Format::Strptime;
+
+# Silences DateTime::Format::Strptime module:
+sub DateTime::Format::Strptime::silent_parse_datetime {
+    my $self = shift;
+    local $SIG{__WARN__} = sub { };
+    $self->parse_datetime(@_);
+}
+
+sub usage {
+    print "usage:
+    rpm2deb-changelog [OPTIONS]
+OPTIONS:
+    -a | --area:
+        Debian area of the package. Defaults to 'unstable'.
+    -d | --debug:
+        Run in debug mode (highest verbosity).
+    -h | --help:
+        Show this help message an exits.
+    -i | --input:
+        Input file path. Defaults to *.changes.
+    -m | --maintainer:
+        Name of the maintainer or path to a file listing maintainers. Defaults to being extracted from *.dsc file.
+    -o | --output:
+        Output file path. Defaults to 'debian.changelog'.
+    -n | --newversion:
+        Packaged software version. Defaults to being guessed using *.dsc file.
+    -p | --package:
+        Package name. Defaults to being guessed using *.dsc file.
+    -u | --urgency:
+        Urgency of update (one of 'low', 'medium', 'high', 'emergency', or 'critical'). Defaults to 'low'.
+    -v | --verbose:
+        Run in verbose mode (higher verbosity).
+    --version:
+        Print script version and exits.
+";
+}
+
+sub parseRpmChangelog {
+    my $file = $_[0];
+
+    use enum qw(
+        FIRST_LINE
+        BEGIN_OF_CHANGE
+        FIRST_LINE_OF_CHANGE
+        SECOND_LINE_OF_CHANGE
+        LINE_OF_CHANGE
+        END_OF_CHANGE
+    );
+
+    my $dateParser = DateTime::Format::Strptime->new(
+        pattern  => '%a %b %d %T %Z %Y',
+        locale   => 'en_US',
+        on_error => 'croak',
+    );
+    
+    my @changes = ();
+    my $comments;
+    my $line;
+    my $date;
+    my $email;
+    my $state = FIRST_LINE;
+    local *F;
+    info("Parsing file $file");
+    open(F, '<', $file) || die("Cannot open RPM *.changes: $!");
+    while(<F>) {
+        $line = $_;
+        chomp($line);
+        
+        if ($line eq '-' x 67) {
+            die("Did not expect change header") unless ($state eq FIRST_LINE) or ($state eq END_OF_CHANGE);
+            
+            if ($state eq END_OF_CHANGE) {
+                push(@changes, {
+                    comments => $comments,
+                    date     => $date,
+                    email    => $email,
+                });
+            }
+            
+            $state = BEGIN_OF_CHANGE;
+            $comments = [];
+            next;
+        }
+        
+        if ($state eq FIRST_LINE) {
+            die("Expected header line") unless ($line eq '');
+        } elsif ($state eq BEGIN_OF_CHANGE) {
+            ($date, $email) = split(' - ', $line, 2);
+            $date = $dateParser->silent_parse_datetime($date);
+            $state = FIRST_LINE_OF_CHANGE;
+        } elsif ($state eq FIRST_LINE_OF_CHANGE) {
+            die("Line should be empty") unless ($line eq '');
+            $state = SECOND_LINE_OF_CHANGE;
+        } elsif ($state eq SECOND_LINE_OF_CHANGE) {
+            die("Expected a change line") unless ($line =~ m/^- /);
+            push(@$comments, substr($line, 2));
+            $state = LINE_OF_CHANGE;
+        } elsif ($state eq LINE_OF_CHANGE) {
+            if ($line eq '') {
+                $state = END_OF_CHANGE;
+            } else {
+                if ($line =~ m/^- /) {
+                    push(@$comments, substr($line, 2));
+                } else {
+                    my $old = pop(@$comments);
+                    push(@$comments, $old.' '.$line);
+                }
+            }
+        } elsif ($state eq END_OF_CHANGE) {
+            die("Expected a change") unless ($line =~ m/^- /);
+            push(@$comments, substr($line, 2));
+            $state = LINE_OF_CHANGE;
+        }
+    }
+    die("Incomplete change") unless ($state eq FIRST_LINE) or ($state eq LINE_OF_CHANGE) or ($state eq END_OF_CHANGE);
+    close(F);
+    
+    return @changes;
+}
+
+sub writeDebianChangelog {
+    my ($file, $changes, $pkgName, $version, $maintainers, $area, $urgency) = @_;
+    
+    my $dateFormatter = DateTime::Format::Strptime->new(
+        pattern  => '%a, %d %b %Y %T %z',
+        locale   => 'en_US',
+        on_error => 'croak',
+    );
+    
+    my $fh;
+    my $revision = @$changes;
+    info("Writing file $file");
+    open($fh, '>', $file) || die("Cannot open Debian changelog: $!");
+    for (@$changes) {
+        my $change = $_;
+        my $date = $dateFormatter->format_datetime($change->{date});
+        my $email = $change->{email};
+        my $maint = $maintainers->{$email};
+        my @comments = @{$change->{comments}};
+        
+        $date = substr($date, 0, 5).' '.substr($date, 6) if (substr($date, 5, 1) eq '0');
+        $revision--;
+        
+        print $fh "$pkgName ($version+$revision) $area; urgency=$urgency\n";
+        print $fh "\n";
+        for (@comments) {
+            my $comment = $_;
+
+            my $line = "  * ";
+            while (length($comment) > 80 - length($line)) {
+                my $space = rindex($comment, ' ', 80 - length($line));
+                if ($space > 0) {
+                    $line .= substr($comment, 0, $space);
+                    $comment = substr($comment, $space + 1);
+                } else {
+                    $line .= substr($comment, 0, 75).'-';
+                    $comment = substr($comment, 75).'-';
+                }
+                
+                print $fh "$line\n";
+                $line = "";
+            }
+            print $fh "$line$comment\n"
+        }
+        print $fh "\n";
+        print $fh " -- $maint <$email>  $date\n";
+        print $fh "\n";
+    }
+    close($fh)
+}
+
+# Ouput functions:
+my $verbosity = 0;
+
+sub message {
+    print "[MSG] $_[0]\n";
+}
+
+sub info {
+    if ($verbosity >= 1) {
+        print "[INF] $_[0]\n";
+    }
+}
+
+sub debug {
+    if ($verbosity >= 2) {
+        print "[DBG] $_[0]\n";
+    }
+}
+
+my $pkgName;
+my $version;
+my $maintainer;
+my %maintainers;
+my $area = 'unstable';
+my $urgency = 'low';
+
+my $inFile;
+my $outFile;
+
+# Argument parsing:
+print "Starting debtransform-changelog @ARGV\n";
+while (@ARGV) {
+    if (($ARGV[0] eq '--help') or ($ARGV[0] eq '-h')) {
+        usage();
+        exit(1);
+    } elsif ($ARGV[0] eq '--version') {
+        print "rpm2deb-changelog version $script_version\n"
+        exit(1);
+    }elsif (($ARGV[0] eq '--verbose') or ($ARGV[0] eq '-v')) {
+        shift @ARGV;
+        $verbosity = 1
+    } elsif (($ARGV[0] eq '--debug') or ($ARGV[0] eq '-d')) {
+        shift @ARGV;
+        $verbosity = 2;
+    } elsif (($ARGV[0] eq '--package') or ($ARGV[0] eq '-p')) {
+        shift @ARGV;
+        usage() if (@ARGV == 0);
+        die("Expected package name") if (@ARGV == 0);
+        $pkgName = shift @ARGV;
+    } elsif (($ARGV[0] eq '--version') or ($ARGV[0] eq '-r')) {
+        shift @ARGV;
+        usage() if (@ARGV == 0);
+        die("Expected version") if (@ARGV == 0);
+        $version = shift @ARGV;
+    } elsif (($ARGV[0] eq '--maintainer') or ($ARGV[0] eq '-m')) {
+        shift @ARGV;
+        usage() if (@ARGV == 0);
+        die("Expected maintainer name or file") if (@ARGV == 0);
+        $maintainer = shift @ARGV;
+    } elsif (($ARGV[0] eq '--area') or ($ARGV[0] eq '-a')) {
+        shift @ARGV;
+        usage() if (@ARGV == 0);
+        die("Expected area") if (@ARGV == 0);
+        $area = shift @ARGV;
+    } elsif (($ARGV[0] eq '--urgency') or ($ARGV[0] eq '-u')) {
+        shift @ARGV;
+        usage() if (@ARGV == 0);
+        die("Expected urgency") if (@ARGV == 0);
+        $urgency = shift @ARGV;
+    } elsif (($ARGV[0] eq '--in') or ($ARGV[0] eq '-i')) {
+        shift @ARGV;
+        usage() if (@ARGV == 0);
+        die("Expected input file name name") if (@ARGV == 0);
+        $inFile = shift @ARGV;
+    } elsif (($ARGV[0] eq '--out') or ($ARGV[0] eq '-o')) {
+        shift @ARGV;
+        usage() if (@ARGV == 0);
+        die("Expected output file name") if (@ARGV == 0);
+        $outFile = shift @ARGV;
+    } else {
+        usage();
+        die("Unknown flag $ARGV[0]")
+    }
+}
+
+debug("Parsed arguments:");
+debug("    Verbosity   : $verbosity");
+debug("    Package Name: $pkgName") if defined($pkgName);
+debug("    Version     : $version") if defined($version);
+debug("    Maintainer  : $maintainer") if defined($maintainer);
+debug("    Area        : $area");
+debug("    Urgency     : $urgency");
+debug("") if defined($inFile) or defined($outFile);    
+debug("    Input file  : $inFile") if defined($inFile);
+debug("    Output file : $outFile") if defined($outFile);
+
+# Input file:
+if (defined($inFile)) {
+    die("Input file should be a RPM *.changes file.") if ($inFile !~ m/\.changes$/);
+    chdir(dirname($inFile));
+} else {
+    local *D;
+    my $file;
+    opendir(D, getcwd()) || die("Could not open current directory: $!");
+    while ($file = readdir(D)) {
+        next if ($file !~ m/\.changes$/);
+        die("Multiple RPM *.changes files: '$file' and '$inFile'") if defined($inFile);
+        $inFile = $file;
+    }
+    closedir(D);
+    die("Could not find RPM *.changes file.") if !defined($inFile);
+}
+
+# Output file:
+$outFile = 'debian.changelog' if !defined($outFile);
+
+# *.dsc file:
+my $dscFile;
+my $dscTags;
+
+sub dscFile {
+    return $dscFile if defined($dscFile);
+    
+    info("Finding *.dsc file.");
+    local *D;
+    my $file;
+    opendir(D, getcwd()) || die("Could not open current directory: $!");
+    while ($file = readdir(D)) {
+        next if ($file !~ m/\.dsc$/);
+        die("Multiple Debian *.dsc files: '$file' and '$inFile'") if defined($dscFile);
+        $dscFile = $file;
+    }
+    closedir(D);
+    die("Could not find Debian *.dsc file.") if !defined($dscFile);
+    
+    return $dscFile;
+}
+
+sub parseDsc {
+    return $dscTags if defined($dscTags);
+
+    info("Parsing *.dsc file.");
+    my %tags;
+    my $tag;
+    my $data;
+    my $skip = 0;
+    local *F;
+    open(F, '<', dscFile()) || die("Error in reading $dscFile: $!\n");
+    while (<F>) {
+        my $line = $_;
+        chomp($line);
+        last if $line eq '';
+        
+        $skip-- if $skip > 0;
+        $skip = 3 if $line =~ m/^-----BEGIN/;
+        next if $skip > 0;
+        
+        if ($line =~ m/^\s/) {
+            die("Expected tag") unless defined($data);
+            $data .= "\n$line";
+        } else {
+            ($tag, $data) = split(':', $line, 2);
+            next unless defined($data);
+        }
+        $data =~ s/^\s+//s;
+        $data =~ s/\s+$//s;
+        $tags{uc($tag)} = $data;        
+    }
+    close(F);
+  
+    $dscTags = \%tags;
+    return \%tags;
+}
+
+# Maintainers file:
+sub parseMaintainer {
+    my $line = $_[0];
+    
+    die("Invalid maintainer: '$line'") if ($line !~ m/^([A-Z][a-z]*(?:(?:-| )[A-Z][a-z]*)*) <([-_.A-Za-z0-9]+@[-_.A-Za-z0-9]+\.[-_.A-Za-z0-9]+)>$/);
+    
+    return ($1, $2);
+}
+
+sub parseMaintainers {
+    my $file = $_[0];
+    
+    local *F;
+    info("Parsing maintainers file: $file");
+    open(F, '<', $file) || return 0;
+    while (<F>) {
+        my $line = $_;
+        chomp($line);
+        
+        my ($maint, $email) = parseMaintainer($line);
+        $maintainers{$email} = $maint;
+    }
+    close(F);
+    
+    return 1;
+}
+
+# Package name default:
+if (!defined($pkgName)) {
+    my $tags = parseDsc();
+    $pkgName = $tags->{'SOURCE'};
+}
+
+# Version default:
+if (!defined($version)) {
+    my $tags = parseDsc();
+    $version = $tags->{'VERSION'};
+}
+
+# Maintainer:
+if (!defined($maintainer)) {
+    my $tags = parseDsc();
+    my ($maint, $email) = parseMaintainer($tags->{'MAINTAINER'});
+    $maintainers{$email} = $maint;
+    $maintainers{''} = $maint;
+} elsif (parseMaintainers($maintainer)) {
+    my $tags = parseDsc();
+    my ($maint, $email) = parseMaintainer($tags->{'MAINTAINER'});
+    $maintainers{$email} = $maint if !defined($maintainers{$email});
+    $maintainers{''} = $email;
+} else {
+    $maintainers{''} = $maintainer;
+}
+
+# Urgency validation:
+die("Bad urgency: $urgency") unless ($urgency ~~ ['low', 'medium', 'high', 'emergency', 'critical']);
+
+debug("Parameters:");
+debug("    Verbosity   : $verbosity");
+debug("    Package Name: $pkgName");
+debug("    Version     : $version");
+debug("    Area        : $area");
+debug("    Urgency     : $urgency");
+debug("");    
+debug("    Input file  : $inFile");
+debug("    Output file : $outFile");
+
+debug("Maintainers     : $maintainers{''}");
+for (keys(%maintainers)) {
+    my $email = $_;
+    debug("    $maintainers{$email} <$email>");
+}
+
+my @changes = parseRpmChangelog($inFile);
+writeDebianChangelog($outFile, \@changes, $pkgName, $version, \%maintainers, $area, $urgency)

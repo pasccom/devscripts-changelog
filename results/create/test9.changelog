@@ -1,0 +1,6 @@
+%PACKAGE% (%VERSION%+1) %AREA%; urgency=%URGENCY%
+
+  * Test 2 line 1 continues here.
+  * Test 2 line 2.
+
+ -- %MAINTAINER%

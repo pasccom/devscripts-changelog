@@ -1,0 +1,77 @@
+.TH rpm2deb-change 1
+.SH NAME
+rpm2deb-change \- Transforms an RPM change entry into a Debian changelog entry.
+.SH SYNOPSIS
+rpm2deb-change [OPTIONS] rpmChanges [debianChangelog]
+
+.SH DESCRIPTION
+\fBrpm2deb-change\fR is a Bash script which transforms the last RPM change
+in an RPM *.changes file into a Debian change in a Debian changelog. The aim of
+this script is to simplify the life of a maintainer, who packages for both
+RPM-based distros and Debian-based distros.
+
+.SH ARGUMENTS
+.TP
+.IR rpmChanges (mandatory)
+The name of the RPM *.changes file.
+.TP
+.IR debianChangelog (optional)
+The name of the Debian changelog file (defaults to "debian.changelog").
+
+.SH OPTIONS
+.TP
+.IR -h|--help
+Displays this help and exit.
+.TP
+.IR --version
+Displays script version and exit.
+.TP
+.IR -d|--debug
+Debug mode: maximum verbosity.
+.TP
+.IR -v|--verbose
+Verbose mode: increased verbosity.
+.TP
+.IR -a|--area
+Distribution of the package (defaults to \fBDISTRIBUTION\fR envirionment variable or "UNRELEASED").
+.TP
+.IR -m|--maintainer
+Package maintainer (defaults to \fBEMAIL\fR environment variable of found in *.dsc file).
+.TP
+.IR -n|--newversion
+Packaged software version (defaults to \fBVERSION\fR environment variable or found in *.dsc file).
+.TP
+.IR -p|--package
+Package name (defaults to \fBPACKAGE\fR environment variable or base name of *.dsc file).
+.TP
+.IR -r|--revision
+Package revision (defaults to \fBREVISION\fR envronment variable or none).
+.TP
+.IR -u|--urgency
+Revision urgency (defaults to \fBURGENCY\fR environment variable or "low").
+
+.SH AUTHOR
+The script and the man page were written by \fBPascal COMBES\fR <\fIpascom@orange.fr\fR>
+
+.SH COPYRIGHT
+\fBrpm2deb-change\fR is copyright 2018 \fBPascal COMBES\fR <\fIpascom@orange.fr\fR>.
+All rights reserved.
+
+Permission is hereby granted, free of charge, to any person
+obtaining a copy of this software and associated documentation files
+(the "Software"), to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of the Software,
+and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT.  IN NO EVENT SHALL SIMON TATHAM BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

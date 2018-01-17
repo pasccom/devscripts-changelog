@@ -1,0 +1,232 @@
+#!/bin/bash
+
+# Version of this script:
+SCRIPT_VERSION=1.0.0
+
+# Usage:
+usage() {
+    echo "$0 [OPTIONS] rpmChanges [debianChangelog]"
+    echo ""
+    echo "Parses the first change in a RPM *.changes file and append it into a Debian changelog."
+    echo ""
+    echo "OPTIONS"
+    echo "    -h|--help"
+    echo "        Displays this help"
+    echo "    --version"
+    echo "        Displays script version"
+    echo "    -d|--debug"
+    echo "        Debug mode: maximum verbosity"
+    echo "    -v|--verbose"
+    echo "        Verbose mode: increased verbosity"
+    echo "    -a|--area"
+    echo "        Distribution of the package"
+    echo "    -m|--maintainer"
+    echo "        Package maintainer"
+    echo "    -n|--newversion"
+    echo "        Packaged software version"
+    echo "    -p|--package"
+    echo "        Package name"
+    echo "    -r|--revision"
+    echo "        Package revision"
+    echo "    -u|--urgency"
+    echo "        Revision urgency"
+    exit 1 
+}
+
+# Messages:
+VERBOSITY=0
+message() {
+    echo "[MSG] $1";
+}
+
+info() {
+    if [ $VERBOSITY -ge 1 ]; then
+        echo "[INF] $1";
+    fi
+}
+
+debug() {
+    if [ $VERBOSITY -ge 2 ]; then
+        echo "[DBG] $1";
+    fi
+}
+
+# Parses arguments:
+while true; do
+    case $1 in
+    -h|--help)
+        usage
+        ;;
+    --version)
+        echo "$0 version $SCRIPT_VERSION"
+        exit 1
+        ;;
+    -d|--debug)
+        VERBOSITY=2
+        ;;
+    -v|--verbose)
+        VERBOSITY=1
+        ;;
+    -p|--package-name)
+        shift
+        PACKAGE="$1"
+        ;;
+    -m|--maintainer)
+        shift
+        EMAIL="$1"
+        ;;
+    -n|--newversion)
+        shift
+        VERSION="$1"
+        ;;
+    -r|--revision)
+        shift
+        REVISION="$1"
+        ;;
+    -a|--area)
+        shift
+        DISTRIBUTION="$1"
+        ;;
+    -u|--urgency)
+        shift
+        URGENCY="$1"
+        ;;
+    *)
+        break
+        ;;
+    esac
+    shift
+done
+if [ $# -lt 1 ]; then
+    usage
+fi
+debug "Parsed arguments:"
+debug "    -Verbosity   : $VERBOSITY"
+debug "    -Package name: $PACKAGE"
+debug "    -Version     : $VERSION"
+debug "    -Revision    : $REVISION"
+debug "    -Area        : $DISTRIBUTION"
+debug "    -Urgency     : $URGENCY"
+
+# Default values:
+DSC_FILE="$(ls *.dsc)"
+if [ -z $PACKAGE ]; then
+    PACKAGE="${DSC_FILE%%.*}"
+else
+    DSC_FILE="$PACKAGE.dsc"
+fi
+if [ -z "$VERSION" ]; then
+    VERSION="$(grep 'Version: ' $DSC_FILE | head -n 1)"
+    VERSION="${VERSION#Version: }"
+fi
+if [ -z "$REVISION" ]; then
+    REVISION="1"
+fi
+if [ -z "$EMAIL" ]; then
+    EMAIL="$(grep 'Maintainer: ' $DSC_FILE | head -n 1)"
+    EMAIL="${EMAIL#Maintainer: }"
+fi
+debug "With default arguments:"
+debug "    -Package name: $PACKAGE"
+debug "    -Version     : $VERSION"
+debug "    -Revision    : $REVISION"
+debug "    -Area        : $DISTRIBUTION"
+debug "    -Urgency     : $URGENCY"
+debug "Email      : $EMAIL"
+
+# Output a Debian change
+#   $1: changelog file
+#   $2: change line
+INCREMENT=
+debian_change() {
+    OPTS=
+    if [ -n "$PACKAGE" ]; then
+        OPTS="$OPTS --package $PACKAGE"
+    fi
+    if [ -n "$VERSION" ]; then
+        if [ -n "$REVISION" ]; then
+            OPTS="$OPTS --newversion $VERSION+$REVISION"
+        else
+            OPTS="$OPTS --newversion $VERSION"
+        fi
+    fi
+    debug "dch options: \"$OPTS\""
+
+    debug "Increment $INCREMENT"
+    if [ -z $INCREMENT ]; then
+        if [ -f "$1" ]; then
+            info "dch increment message: \"$2\""
+            EMAIL="$EMAIL" dch --increment --nomultimaint -c "$1" "$2"
+        else
+            info "dch create message \"$2\""
+            EMAIL="$EMAIL" dch $OPTS --create --nomultimaint -c "$1" "$2"
+        fi
+        
+        INCREMENT=done
+        if [ -z "$DISTRIBUTION" ]; then
+            echo "Please set distribution manually in \"$1\""
+        fi
+    else
+        info "dch append message: \"$2\""
+        dch --append --nomultimaint -c "$1" "$2"
+    fi
+}
+
+# Input and ouput files:
+IN_FILE="$1"
+debug "Input file : \"$IN_FILE\""
+OUT_FILE="debian.changelog"
+if [ $# -gt 1 ]; then
+    OUT_FILE="$2"
+fi
+debug "Output file: \"$OUT_FILE\""
+if [ ! -f "$IN_FILE" ]; then
+    usage
+fi
+
+# Transform RPM *.changes into Debian changelog:
+FIRST_HEADER=
+SECOND_HEADER=
+CHANGE=
+while IFS='' read -r LINE || [ -n "$LINE" ]; do
+    debug "Line: \"$LINE\""
+    if [ -z "$FIRST_HEADER" ]; then
+        FIRST_HEADER="$LINE"
+        continue
+    fi
+    if [ -z "$SECOND_HEADER" ]; then
+        SECOND_HEADER="$LINE"
+        continue
+    fi
+    if [ -z "$LINE" ]; then
+        continue
+    fi
+    info "Line: \"$LINE\""
+    if [ "$LINE" = "$FIRST_HEADER" ]; then
+        break
+    fi
+    if [ "${LINE:0:2}" = '- ' ]; then
+        if [ -n "$CHANGE" ]; then
+            debian_change "$OUT_FILE" "$CHANGE"
+        fi
+        CHANGE="${LINE:2}"
+    else
+        CHANGE="${CHANGE} ${LINE}"
+    fi
+done < "$IN_FILE"
+if [ -n "$CHANGE" ]; then
+    debian_change "$OUT_FILE" "$CHANGE"
+fi
+
+# Release revision:
+OPTS=
+if [ -n "$DISTRIBUTION" ]; then
+    OPTS="$OPTS --distribution $DISTRIBUTION"
+fi
+if [ -n "$URGENCY" ]; then
+    OPTS="$OPTS --urgency $URGENCY"
+fi
+debug "dch options: \"$OPTS\""
+debug "dch email: \"$EMAIL\""
+info "dch release"
+EMAIL="$EMAIL" dch $OPTS --release --nomultimaint -c "$OUT_FILE" "" > /dev/null
