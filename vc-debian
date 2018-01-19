@@ -161,4 +161,8 @@ chmod $mode "$changelog"
 chown $user "$changelog"
 
 # Added by Pascal COMBES <pascom@orange.fr>
-rpm2deb-change "$changelog"
+ls *.dsc > /dev/null 2>&1
+if [ $? -eq 0 ]; then
+	echo "Applying change to debian.changelog"
+	rpm2deb-change "$changelog"
+fi
