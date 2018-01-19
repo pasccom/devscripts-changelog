@@ -1,0 +1,51 @@
+.TH vc-debian 1
+.SH NAME
+vc-debian \- Create a SUSE stype changes entry
+.SH SYNOPSIS
+.B vc
+.RB [ -m
+.IR message ]
+.RB [ -e ]
+.RI [ changesfile_or_dir
+.RI [ commentfile ]]
+
+.SH DESCRIPTION
+The \fBvc\fP tool adds a new changes entry to a SUSE \fB.changes\fP file.
+The \fB-m\fP option can be used to directly specify the entry, if it is
+not given an editor is started to interactively enter the new changes
+entry. If a \fIcommentfile\fP is given, its content is used as template
+for the new entry instead of an empty entry, whereas the \fB-e\fP option
+suppresses the creation of an empty entry.
+
+If no \fIchangesfile\fP is specified, \fBvc\fP will search the current
+directory for a file ending with \fB.changes\fP. If a directory is
+specified instead of a changes will, it will be searched instead.
+
+.SH AGUMENTS
+.TP
+.IR changesfile_or_dir (optional)
+Path to RPM *.changes file to edit or project directory.
+.TP
+.IR commentfile (optional)
+Path to files containg comments to add to changelog.
+
+.SH OPTIONS
+.TP
+.BR -m\ \fImessage\fR 
+Message to add to the changelog for the new revision.
+.TP
+.BR -e
+Edit the message for the last revision.
+
+.SH AUTHOR
+The script and the man page originates from \fBSuSE Linux AG\fR.
+
+They were further tuned by \fBPascal COMBES\fR <\fIpascom@orange.fr\fR>
+
+
+.SH SEE ALSO
+.BR vc (1)
+
+.SH COPYRIGHT
+\fBvc-debian\fR is copyright 2018 \fBPascal COMBES\fR <\fIpascom@orange.fr\fR>.
+It is based on \fBvc\fR copyright 1997-2017 \fBSuSE Linux AG\fR Nuernberg, Germany
