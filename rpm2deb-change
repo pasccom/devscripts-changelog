@@ -126,8 +126,12 @@ debug "    -Area        : $DISTRIBUTION"
 debug "    -Urgency     : $URGENCY"
 
 # Default values:
-DSC_FILE="$(ls *.dsc)"
-if [ -z $PACKAGE ]; then
+DSC_FILE="$(ls *.dsc 2> /dev/null)"
+if [ -z "$DSC_FILE" ]; then
+    message "Missing Debian package description file. Are you sure you are in package directory?"
+    exit 2
+fi
+if [ -z "$PACKAGE" ]; then
     PACKAGE="${DSC_FILE%%.*}"
 else
     DSC_FILE="$PACKAGE.dsc"
