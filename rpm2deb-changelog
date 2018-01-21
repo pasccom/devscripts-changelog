@@ -17,7 +17,7 @@
 # You should have received a copy of the GNU General Public License
 # along with devscripts-changelog. If not, see <http://www.gnu.org/licenses/>
 
-my $script_version='0.0.1';
+my $script_version='1.0.0';
 
 use strict;
 
@@ -91,6 +91,7 @@ sub parseRpmChangelog {
     while(<F>) {
         $line = $_;
         chomp($line);
+        debug("Read: $line");
         
         if ($line eq '-' x 67) {
             die("Did not expect change header") unless ($state eq FIRST_LINE) or ($state eq END_OF_CHANGE);
@@ -139,6 +140,13 @@ sub parseRpmChangelog {
         }
     }
     die("Incomplete change") unless ($state eq FIRST_LINE) or ($state eq LINE_OF_CHANGE) or ($state eq END_OF_CHANGE);
+    if (($state eq LINE_OF_CHANGE) or ($state eq END_OF_CHANGE)) {
+        push(@changes, {
+            comments => $comments,
+            date     => $date,
+            email    => $email,
+        });
+    }
     close(F);
     
     return @changes;
@@ -156,6 +164,7 @@ sub writeDebianChangelog {
     my $fh;
     my $revision = @$changes;
     info("Writing file $file");
+    debug("Number of changes: $revision");
     open($fh, '>', $file) || die("Cannot open Debian changelog: $!");
     for (@$changes) {
         my $change = $_;
@@ -165,8 +174,8 @@ sub writeDebianChangelog {
         my @comments = @{$change->{comments}};
         
         $date = substr($date, 0, 5).' '.substr($date, 6) if (substr($date, 5, 1) eq '0');
-        $revision--;
         
+	debug("Writing: $pkgName ($version+$revision)");
         print $fh "$pkgName ($version+$revision) $area; urgency=$urgency\n";
         print $fh "\n";
         for (@comments) {
@@ -191,6 +200,8 @@ sub writeDebianChangelog {
         print $fh "\n";
         print $fh " -- $maint <$email>  $date\n";
         print $fh "\n";
+        
+        $revision--;
     }
     close($fh)
 }
